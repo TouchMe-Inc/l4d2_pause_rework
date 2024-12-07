@@ -12,7 +12,7 @@ public Plugin myinfo = {
     name        = "PauseRework",
     author      = "CanadaRox, TouchMe",
     description = "",
-    version     = "build0001",
+    version     = "build0002",
     url         = "https://github.com/TouchMe-Inc/l4d2_pause_rework"
 };
 
@@ -213,7 +213,11 @@ public void OnPluginStart()
     RegConsoleCmd("sm_r", Cmd_Ready);
     RegConsoleCmd("sm_unready", Cmd_Unready);
     RegConsoleCmd("sm_nr", Cmd_Unready);
+
     AddCommandListener(Vote_Callback, "Vote"); // Hook vote <KEY_F1> or <KEY_F2>.
+    AddCommandListener(ConCmd_Pause, "pause");
+    AddCommandListener(ConCmd_Pause, "setpause");
+    AddCommandListener(ConCmd_Pause, "unpause");
 }
 
 /**
@@ -308,9 +312,7 @@ public Action Cmd_Pause(int iClient, int args)
     {
         g_bClientWantUnpause[iPlayer] = false;
 
-        if (!IsClientInGame(iPlayer)
-        || IsFakeClient(iPlayer)
-        || !IsValidTeam(GetClientTeam(iPlayer))) {
+        if (!IsClientInGame(iPlayer) || IsFakeClient(iPlayer)) {
             continue;
         }
 
@@ -321,7 +323,7 @@ public Action Cmd_Pause(int iClient, int args)
 
     SetPauseState(PauseState_Active);
 
-    SetGlobalPause(true);
+    SetGlobalPause(iClient, true);
 
     // Show panel.
     CreateTimer(1.0, Timer_UpdatePanel, .flags = TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
@@ -433,7 +435,7 @@ Action Timer_Countdown(Handle timer)
     {
         SetPauseState(PauseState_None);
         
-        SetGlobalPause(false);
+        SetGlobalPause(GetRandomClient(), false);
 
         return Plugin_Stop;
     }
@@ -541,9 +543,18 @@ Action Vote_Callback(int iClient, const char[] sCmd, int iArgs)
     return Plugin_Continue;
 }
 
-void SetGlobalPause(bool bEnable)
+Action ConCmd_Pause(int iClient, const char[] szCommand, int iArgs)
 {
-    int iClient = -1;
+    if (!GetConVarBool(g_cvPausable)) return Plugin_Handled;
+    return Plugin_Continue;
+}
+
+void SetGlobalPause(int iClient, bool bEnable)
+{
+    SetConVarBool(g_cvPausable, true);
+    FakeClientCommand(iClient, "pause");
+    SetConVarBool(g_cvPausable, false);
+
     for (int iPlayer = 1; iPlayer <= MaxClients; iPlayer ++)
     {
         if (!IsClientInGame(iPlayer)|| IsFakeClient(iPlayer)) {
@@ -552,7 +563,7 @@ void SetGlobalPause(bool bEnable)
 
         switch (GetClientTeam(iPlayer))
         {
-            case TEAM_SPECTATOR: g_cvNoclipDuringPause.ReplicateToClient(iPlayer, bEnable ? "1" : "0");
+            case TEAM_SPECTATOR: SendConVarValue(iPlayer, g_cvNoclipDuringPause, bEnable ? "1" : "0");
 
             case TEAM_INFECTED:
             {
@@ -570,13 +581,6 @@ void SetGlobalPause(bool bEnable)
         }
 
         iClient = iPlayer;
-    }
-
-    if (iClient != -1)
-    {
-        SetConVarBool(g_cvPausable, true);
-        FakeClientCommand(iClient, bEnable ? "pause" : "unpause");
-        SetConVarBool(g_cvPausable, false);
     }
 }
 
@@ -781,7 +785,7 @@ bool IsGameReady() {
 /**
  *
  */
-void SetTeamWantUnpause(int iTeam, bool bReady)
+void SetTeamWantUnpause(int iTeam, bool bWantUnpause)
 {
     for (int iClient = 1; iClient <= MaxClients; iClient++)
     {
@@ -789,20 +793,37 @@ void SetTeamWantUnpause(int iTeam, bool bReady)
             continue;
         }
 
-        SetClientWantUnpause(iClient, bReady);
+        SetClientWantUnpause(iClient, bWantUnpause);
     }
 }
 
 /**
  *
  */
-bool SetClientWantUnpause(int iClient, bool bReady)
+int GetRandomClient()
+{
+    for (int iClient = 1; iClient <= MaxClients; iClient++)
+    {
+        if (!IsClientInGame(iClient) || IsFakeClient(iClient) || !IsValidTeam(GetClientTeam(iClient))) {
+            continue;
+        }
+
+        return iClient;
+    }
+
+    return -1;
+}
+
+/**
+ *
+ */
+bool SetClientWantUnpause(int iClient, bool bWantUnpause)
 {
     bool bBeforeReady = g_bClientWantUnpause[iClient];
 
-    g_bClientWantUnpause[iClient] = bReady;
+    g_bClientWantUnpause[iClient] = bWantUnpause;
 
-    return bBeforeReady != bReady;
+    return bBeforeReady != bWantUnpause;
 }
 
 /**

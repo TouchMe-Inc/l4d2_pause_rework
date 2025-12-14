@@ -9,11 +9,11 @@
 
 public Plugin myinfo =
 {
-	name = "[Pause] HeaderServername",
-	author = "TouchMe",
-	description = "Adds the server name to the top of Pause",
-	version = "build0001",
-	url = "https://github.com/TouchMe-Inc/l4d2_pause_rework"
+    name = "[PauseHeader] Servername",
+    author = "TouchMe",
+    description = "Adds the server name to the top of Pause",
+    version = "build0001",
+    url = "https://github.com/TouchMe-Inc/l4d2_pause_rework"
 };
 
 
@@ -24,13 +24,12 @@ public Plugin myinfo =
 
 
 ConVar
-	g_cvServerNameCvar,
-	g_cvServerNamer
+    g_cvServerNameCvar,
+    g_cvServerNamer,
+    g_cvMaxPlayers
 ;
 
 int g_iThisIndex = -1;
-
-bool g_bPauseAvailable = false;
 
 
 /**
@@ -38,44 +37,20 @@ bool g_bPauseAvailable = false;
   */
 public void OnAllPluginsLoaded()
 {
-	g_bPauseAvailable = LibraryExists(LIB_PAUSE);
-
-	if (g_bPauseAvailable) {
-		g_iThisIndex = PushPauseItem(PausePanelPos_Header, "OnPreparePauseItem");
-	}
-}
-
-/**
-  * Global event. Called when a library is removed.
-  *
-  * @param sName     Library name
-  */
-public void OnLibraryRemoved(const char[] sName)
-{
-	if (StrEqual(sName, LIB_PAUSE)) {
-		g_bPauseAvailable = false;
-	}
-}
-
-/**
-  * Global event. Called when a library is added.
-  *
-  * @param sName     Library name
-  */
-public void OnLibraryAdded(const char[] sName)
-{
-	if (StrEqual(sName, LIB_PAUSE)) {
-		g_bPauseAvailable = true;
-	}
+    if (LibraryExists(LIB_PAUSE)) {
+        g_iThisIndex = PushPauseItem(PausePanelPos_Header, "OnPreparePauseItem");
+    }
 }
 
 public void OnPluginStart()
 {
-	g_cvServerNameCvar	= CreateConVar("sm_ph_servername_cvar", "", "blank = hostname");
+    g_cvServerNameCvar	= CreateConVar("sm_ph_servername_cvar", "", "blank = hostname");
 
-	g_cvServerNamer = FindServerNameConVar();
+    g_cvServerNamer = FindServerNameConVar();
 
-	HookConVarChange(g_cvServerNameCvar, OnServerCvarChanged);
+    HookConVarChange(g_cvServerNameCvar, OnServerCvarChanged);
+
+    g_cvMaxPlayers = FindConVar("sv_maxplayers");
 }
 
 /**
@@ -83,21 +58,28 @@ public void OnPluginStart()
  */
 public Action OnPreparePauseItem(PausePanelPos ePos, int iClient, int iIndex)
 {
-	if (!g_bPauseAvailable || ePos != PausePanelPos_Header || g_iThisIndex != iIndex) {
-		return Plugin_Continue;
-	}
+    if (ePos != PausePanelPos_Header || g_iThisIndex != iIndex) {
+        return Plugin_Continue;
+    }
 
-	char buffer[64]; GetConVarString(g_cvServerNamer, buffer, sizeof(buffer));
-	UpdatePauseItem(ePos, iIndex, buffer);
+    char buffer[64]; GetConVarString(g_cvServerNamer, buffer, sizeof(buffer));
 
-	return Plugin_Stop;
+    int iMaxPlayers = GetConVarInt(g_cvMaxPlayers);
+
+    if (iMaxPlayers != -1) {
+        Format(buffer, sizeof buffer, "%s [%d/%d]", buffer, GetClientConnectedCount(), iMaxPlayers);
+    }
+
+    UpdatePauseItem(ePos, iIndex, buffer);
+
+    return Plugin_Stop;
 }
 
 /**
  *
  */
 void OnServerCvarChanged(ConVar convar, const char[] sOldValue, const char[] sNewValue) {
-	g_cvServerNamer = FindServerNameConVar();
+    g_cvServerNamer = FindServerNameConVar();
 }
 
 /**
@@ -105,12 +87,26 @@ void OnServerCvarChanged(ConVar convar, const char[] sOldValue, const char[] sNe
  */
 ConVar FindServerNameConVar()
 {
-	char buffer[64]; GetConVarString(g_cvServerNameCvar, buffer, sizeof(buffer));
-	ConVar cvServerName = FindConVar(buffer);
+    char buffer[64]; GetConVarString(g_cvServerNameCvar, buffer, sizeof(buffer));
+    ConVar cvServerName = FindConVar(buffer);
 
-	if (FindConVar(buffer) == null) {
-		return FindConVar("hostname");
-	}
+    if (FindConVar(buffer) == null) {
+        return FindConVar("hostname");
+    }
 
-	return cvServerName;
+    return cvServerName;
+}
+
+int GetClientConnectedCount()
+{
+    int iCount = 0;
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientConnected(i) && !IsFakeClient(i)) {
+            iCount++;
+        }
+    }
+
+    return iCount;
 }

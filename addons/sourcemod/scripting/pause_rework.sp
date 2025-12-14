@@ -256,8 +256,8 @@ public void OnPluginStart()
 
     g_cvSpamCooldownInitial = CreateConVar("sm_pause_spam_cd_init", "2.0", "Initial cooldown time in seconds", _, true, 0.0);
     g_cvSpamCooldownIncrement = CreateConVar("sm_pause_spam_cd_inc", "1.0", "Cooldown increment time in seconds", _, true,  0.0);
-    g_cvMaxAttemptsBeforeIncrement = CreateConVar("sm_pause_spam_attempts_before_inc", "1", "Maximum number of attempts before increasing cooldown", _, true, 10.0);
-    
+    g_cvMaxAttemptsBeforeIncrement = CreateConVar("sm_pause_spam_attempts_before_inc", "2", "Maximum number of attempts before increasing cooldown", _, true, 10.0);
+
 
     /*
      * Register ConVar change callbacks.
@@ -400,7 +400,7 @@ public Action Cmd_Pause(int iClient, int args)
 
         GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), 18);
 
-        CPrintToChat(iPlayer, "%T%T", "TAG", iPlayer, "PAUSE", iPlayer, szPlayerName);
+        CPrintToChatEx(iPlayer, iClient, "%T%T", "TAG", iPlayer, "PAUSE", iPlayer, szPlayerName);
     }
 
     SetPauseState(PauseState_Active);
@@ -513,14 +513,18 @@ Action Timer_Countdown(Handle timer)
         return Plugin_Stop;
     }
 
-    if (-- g_iCountdownTimer <= 0)
+    if (g_iCountdownTimer <= 0)
     {
         SetPauseState(PauseState_None);
-        
+
         SetGlobalPause(GetRandomClient(), false);
 
         return Plugin_Stop;
     }
+
+    CPrintToChatAll("%t%t", "TAG", "COUNTDOWN", g_iCountdownTimer);
+
+    g_iCountdownTimer--
 
     return Plugin_Continue;
 }
@@ -588,7 +592,7 @@ Action Cmd_Unready(int iClient, int iArgs)
 
             GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), 18);
 
-            CPrintToChat(iPlayer, "%T%T", "TAG", iPlayer, "STOP_COUNTDOWN_PLAYER_UNREADY", iPlayer, szPlayerName);
+            CPrintToChatEx(iPlayer, iClient, "%T%T", "TAG", iPlayer, "STOP_COUNTDOWN_PLAYER_UNREADY", iPlayer, szPlayerName);
         }
     }
 
@@ -652,7 +656,7 @@ void SetGlobalPause(int iClient, bool bEnable)
                 if (bEnable && IsClientGhost(iPlayer))
                 {
                     SetEntProp(iPlayer, Prop_Send, "m_hasVisibleThreats", 1);
-                    
+
                     int iButtons = GetClientButtons(iPlayer);
 
                     if (iButtons & IN_ATTACK) {
@@ -727,16 +731,11 @@ Panel BuildPanel(int iClient)
         DrawPanelSpace(hPanel);
     }
 
-    if (!IsPauseState(PauseState_Countdown))
+    switch (g_ePauseMode)
     {
-        switch (g_ePauseMode)
-        {
-            case PauseMode_PlayerReady: DrawPanelBodyForPlayerReady(hPanel, iClient);
-            case PauseMode_TeamReady: DrawPanelBodyForTeamReady(hPanel, iClient);
-        }
+        case PauseMode_PlayerReady: DrawPanelBodyForPlayerReady(hPanel, iClient);
+        case PauseMode_TeamReady: DrawPanelBodyForTeamReady(hPanel, iClient);
     }
-    
-    else DrawPanelFormatText(hPanel, "%T", "PANEL_COUNTDOWN", iClient, g_iCountdownTimer);
 
     /*
      * Footer.
@@ -1037,7 +1036,7 @@ bool IsValidTeam(int iTeam) {
  * @return              True if client is in ghost state, false otherwise.
  */
 bool IsClientGhost(int iClient) {
-	return view_as<bool>(GetEntProp(iClient, Prop_Send, "m_isGhost"));
+    return view_as<bool>(GetEntProp(iClient, Prop_Send, "m_isGhost"));
 }
 
 /**
@@ -1046,5 +1045,5 @@ bool IsClientGhost(int iClient) {
  * @return                  Returns true if is second round, otherwise false.
  */
 bool InSecondHalfOfRound() {
-	return view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
+    return view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 }

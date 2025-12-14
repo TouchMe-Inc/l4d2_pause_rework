@@ -75,7 +75,7 @@ forward void OnChangePauseState(PauseState eOldState, PauseState eNewState);
  * @param iIndex Item index.
  * @return Plugin_Continue to allow, Plugin_Stop to skip rendering.
  */
-forward Action OnPrepareReadyUpItem(PausePanelPos ePos, int iClient, int iIndex);
+forward Action OnPreparePauseItem(PausePanelPos ePos, int iClient, int iIndex);
 
 /**
  * Called when a ready-up item is removed.
@@ -84,7 +84,7 @@ forward Action OnPrepareReadyUpItem(PausePanelPos ePos, int iClient, int iIndex)
  * @param iOldIndex Index of the removed item.
  * @param iNewIndex Index of the item that replaced it.
  */
-forward void OnRemoveReadyUpItem(PausePanelPos ePos, int iOldIndex, int iNewIndex);
+forward void OnRemovePauseItem(PausePanelPos ePos, int iOldIndex, int iNewIndex);
 
 
 public SharedPlugin __pl_pause_rework =

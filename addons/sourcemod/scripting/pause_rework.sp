@@ -11,8 +11,8 @@
 public Plugin myinfo = {
     name        = "PauseRework",
     author      = "CanadaRox, TouchMe",
-    description = "",
-    version     = "build0002",
+    description = "Pause for Versus mode!",
+    version     = "build0003",
     url         = "https://github.com/TouchMe-Inc/l4d2_pause_rework"
 };
 
@@ -34,6 +34,8 @@ public Plugin myinfo = {
  * Libs.
  */
 #define LIB_READYUP             "readyup_rework"
+
+#define MAXSIZE_SHORT_NAME 18
 
 /**
  * Native error messages.
@@ -86,6 +88,8 @@ Handle
     g_hPanelFooter = null
 ;
 
+Handle SpecTimer[MAXPLAYERS + 1];
+
 int g_iPauseDelay = 0;
 int g_iPauseLimit = 0;
 float g_fSpamCooldownInitial = 0.0;
@@ -94,12 +98,14 @@ int g_iMaxAttempts = 0;
 
 int g_iCountdownTimer = 0;
 
-float g_fClientCommandSpamCooldown[MAXPLAYERS + 1];
-int g_iClientCommandSpamAttempts[MAXPLAYERS + 1];
+float g_fClientCommandSpamCooldown[MAXPLAYERS + 1] = {0.0, ...};
+int g_iClientCommandSpamAttempts[MAXPLAYERS + 1] = {0, ...};
 
 bool g_bClientWantUnpause[MAXPLAYERS + 1];
 
 int g_iTeamLimit[2] = {0, ...};
+
+bool g_bForceStarted = false;
 
 bool g_bReadyUpAvailable = false;
 
@@ -256,8 +262,7 @@ public void OnPluginStart()
 
     g_cvSpamCooldownInitial = CreateConVar("sm_pause_spam_cd_init", "2.0", "Initial cooldown time in seconds", _, true, 0.0);
     g_cvSpamCooldownIncrement = CreateConVar("sm_pause_spam_cd_inc", "1.0", "Cooldown increment time in seconds", _, true,  0.0);
-    g_cvMaxAttemptsBeforeIncrement = CreateConVar("sm_pause_spam_attempts_before_inc", "1", "Maximum number of attempts before increasing cooldown", _, true, 10.0);
-    
+    g_cvMaxAttemptsBeforeIncrement = CreateConVar("sm_pause_spam_attempts_before_inc", "2", "Maximum number of attempts before increasing cooldown", _, true, 10.0);
 
     /*
      * Register ConVar change callbacks.
@@ -281,6 +286,8 @@ public void OnPluginStart()
     g_fSpamCooldownIncrement = GetConVarFloat(g_cvSpamCooldownIncrement);
     g_iMaxAttempts = GetConVarInt(g_cvMaxAttemptsBeforeIncrement);
 
+    HookEvent("player_team", Event_PlayerTeam, EventHookMode_Post);
+
     /*
      * Player Commands.
      */
@@ -289,6 +296,8 @@ public void OnPluginStart()
     RegConsoleCmd("sm_r", Cmd_Ready);
     RegConsoleCmd("sm_unready", Cmd_Unready);
     RegConsoleCmd("sm_nr", Cmd_Unready);
+    RegAdminCmd("sm_forcestart",Cmd_ForceStart, ADMFLAG_BAN, "Forces the round to start regardless of player ready status");
+    RegAdminCmd("sm_fs",        Cmd_ForceStart, ADMFLAG_BAN, "Forces the round to start regardless of player ready status");
 
     AddCommandListener(Vote_Callback, "Vote"); // Hook vote <KEY_F1> or <KEY_F2>.
     AddCommandListener(ConCmd_Pause, "pause");
@@ -344,8 +353,50 @@ void OnMaxAttemptsBeforeIncementChanged(ConVar convar, const char[] oldValue, co
     g_iMaxAttempts = GetConVarInt(convar);
 }
 
-public OnMapStart() {
+/**
+ *
+ */
+void Event_PlayerTeam(Event event, const char[] szName, bool bDontBroadcast)
+{
+    if (IsPauseState(PauseState_None)) {
+        return;
+    }
+
+    int iClient = GetClientOfUserId(GetEventInt(event, "userid"));
+
+    if (!iClient || IsFakeClient(iClient)) {
+        return;
+    }
+
+    int iOldTeam = GetEventInt(event, "oldteam");
+    int iTeam = GetEventInt(event, "team");
+
+    if (IsValidTeam(iOldTeam) && iTeam == TEAM_SPECTATOR)
+    {
+        if (SpecTimer[iClient] != null) {
+            delete SpecTimer[iClient];
+        }
+
+        SpecTimer[iClient] = CreateTimer(3.0, Timer_SecureSpec, iClient);
+    }
+}
+
+Action Timer_SecureSpec(Handle timer, any iClient)
+{
+    SpecTimer[iClient] = null;
+    return Plugin_Stop;
+}
+
+public OnMapStart()
+{
     g_iTeamLimit[0] = g_iTeamLimit[1] = 0;
+
+    for (int iClient = 1; iClient <= MaxClients; iClient ++)
+    {
+        g_fClientCommandSpamCooldown[iClient] = 0.0;
+    }
+
+    g_bForceStarted = false;
 }
 
 public Action Cmd_Pause(int iClient, int args)
@@ -358,27 +409,13 @@ public Action Cmd_Pause(int iClient, int args)
         return Plugin_Continue;
     }
 
-    if (!iClient || !IsClientInGame(iClient)) {
+    if (!iClient || !IsClientInGame(iClient) || SpecTimer[iClient] != null) {
         return Plugin_Continue;
     }
 
     int iTeam = GetClientTeam(iClient);
 
     if (!IsValidTeam(iTeam)) {
-        return Plugin_Handled;
-    }
-
-    int iSpamCommand = IsClientSpamCommand(iClient);
-
-    if (iSpamCommand == 0)
-    {
-        CPrintToChat(iClient, "%T%T", "TAG", iClient, "STOP_SPAM_COMMAND", iClient, GetClientCommandSpamCooldown(iClient));
-        return Plugin_Handled;
-    }
-
-    else if (iSpamCommand == 1)
-    {
-        CPrintToChat(iClient, "%T%T", "TAG", iClient, "STOP_SPAM_COMMAND_WITH_INC", iClient, GetClientCommandSpamCooldown(iClient), g_fSpamCooldownIncrement);
         return Plugin_Handled;
     }
 
@@ -389,7 +426,7 @@ public Action Cmd_Pause(int iClient, int args)
         return Plugin_Handled;
     }
 
-    char szPlayerName[32];
+    char szPlayerName[MAX_NAME_LENGTH];
     for (int iPlayer = 1; iPlayer <= MaxClients; iPlayer ++)
     {
         g_bClientWantUnpause[iPlayer] = false;
@@ -398,9 +435,9 @@ public Action Cmd_Pause(int iClient, int args)
             continue;
         }
 
-        GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), 18);
+        GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), MAXSIZE_SHORT_NAME);
 
-        CPrintToChat(iPlayer, "%T%T", "TAG", iPlayer, "PAUSE", iPlayer, szPlayerName);
+        CPrintToChatEx(iPlayer, iClient, "%T%T", "TAG", iPlayer, "PAUSE", iPlayer, szPlayerName);
     }
 
     SetPauseState(PauseState_Active);
@@ -409,6 +446,8 @@ public Action Cmd_Pause(int iClient, int args)
 
     // Show panel.
     CreateTimer(1.0, Timer_UpdatePanel, .flags = TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+
+    g_bForceStarted = false;
 
     return Plugin_Handled;
 }
@@ -428,7 +467,8 @@ Action Timer_UpdatePanel(Handle timer)
 
     for (int iClient = 1; iClient <= MaxClients; iClient ++)
     {
-        if (!IsClientInGame(iClient) || IsFakeClient(iClient)) {
+        if (!IsClientInGame(iClient)
+            || (IsFakeClient(iClient) && !IsClientSourceTV(iClient))) {
             continue;
         }
 
@@ -459,7 +499,7 @@ Action Cmd_Ready(int iClient, int iArgs)
         return Plugin_Continue;
     }
 
-    if (!iClient || !IsClientInGame(iClient)) {
+    if (!iClient || !IsClientInGame(iClient) || SpecTimer[iClient] != null) {
         return Plugin_Continue;
     }
 
@@ -469,7 +509,7 @@ Action Cmd_Ready(int iClient, int iArgs)
         return Plugin_Handled;
     }
 
-    if (IsClientWantUnpause(iClient)) {
+    if (IsClientWantUnpause(iClient) || g_bForceStarted) {
         return Plugin_Handled;
     }
 
@@ -513,14 +553,18 @@ Action Timer_Countdown(Handle timer)
         return Plugin_Stop;
     }
 
-    if (-- g_iCountdownTimer <= 0)
+    if (g_iCountdownTimer <= 0)
     {
         SetPauseState(PauseState_None);
-        
+
         SetGlobalPause(GetRandomClient(), false);
 
         return Plugin_Stop;
     }
+
+    CPrintToChatAll("%t%t", "TAG", "COUNTDOWN", g_iCountdownTimer);
+
+    g_iCountdownTimer--
 
     return Plugin_Continue;
 }
@@ -538,7 +582,7 @@ Action Cmd_Unready(int iClient, int iArgs)
         return Plugin_Continue;
     }
 
-    if (!iClient || !IsClientInGame(iClient)) {
+    if (!iClient || !IsClientInGame(iClient) || SpecTimer[iClient] != null) {
         return Plugin_Continue;
     }
 
@@ -548,7 +592,7 @@ Action Cmd_Unready(int iClient, int iArgs)
         return Plugin_Handled;
     }
 
-    if (!IsClientWantUnpause(iClient)) {
+    if (!IsClientWantUnpause(iClient) || g_bForceStarted) {
         return Plugin_Handled;
     }
 
@@ -586,11 +630,44 @@ Action Cmd_Unready(int iClient, int iArgs)
                 continue;
             }
 
-            GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), 18);
+            GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), MAXSIZE_SHORT_NAME);
 
-            CPrintToChat(iPlayer, "%T%T", "TAG", iPlayer, "STOP_COUNTDOWN_PLAYER_UNREADY", iPlayer, szPlayerName);
+            CPrintToChatEx(iPlayer, iClient, "%T%T", "TAG", iPlayer, "STOP_COUNTDOWN_PLAYER_UNREADY", iPlayer, szPlayerName);
         }
     }
+
+    return Plugin_Handled;
+}
+
+/**
+ *
+ */
+Action Cmd_ForceStart(int iClient, int args)
+{
+    if (IsPauseState(PauseState_None)) {
+        return Plugin_Continue;
+    }
+
+    SetPauseState(PauseState_Countdown);
+
+    g_iCountdownTimer = g_iPauseDelay;
+    CreateTimer(1.0, Timer_Countdown, .flags = TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+
+    char szPlayerName[MAX_NAME_LENGTH];
+    GetClientNameFixed(iClient, szPlayerName, sizeof(szPlayerName), MAXSIZE_SHORT_NAME);
+
+    for (int iPlayer = 1; iPlayer <= MaxClients; iPlayer ++)
+    {
+        if (!IsClientInGame(iPlayer)
+        || IsFakeClient(iPlayer)
+        || !IsValidTeam(GetClientTeam(iPlayer))) {
+            continue;
+        }
+
+        CPrintToChat(iPlayer, "%T%T", "TAG", iPlayer, "FORCE_START_BY_ADMIN", iPlayer, szPlayerName);
+    }
+
+    g_bForceStarted = true;
 
     return Plugin_Handled;
 }
@@ -652,7 +729,7 @@ void SetGlobalPause(int iClient, bool bEnable)
                 if (bEnable && IsClientGhost(iPlayer))
                 {
                     SetEntProp(iPlayer, Prop_Send, "m_hasVisibleThreats", 1);
-                    
+
                     int iButtons = GetClientButtons(iPlayer);
 
                     if (iButtons & IN_ATTACK) {
@@ -727,16 +804,11 @@ Panel BuildPanel(int iClient)
         DrawPanelSpace(hPanel);
     }
 
-    if (!IsPauseState(PauseState_Countdown))
+    switch (g_ePauseMode)
     {
-        switch (g_ePauseMode)
-        {
-            case PauseMode_PlayerReady: DrawPanelBodyForPlayerReady(hPanel, iClient);
-            case PauseMode_TeamReady: DrawPanelBodyForTeamReady(hPanel, iClient);
-        }
+        case PauseMode_PlayerReady: DrawPanelBodyForPlayerReady(hPanel, iClient);
+        case PauseMode_TeamReady: DrawPanelBodyForTeamReady(hPanel, iClient);
     }
-    
-    else DrawPanelFormatText(hPanel, "%T", "PANEL_COUNTDOWN", iClient, g_iCountdownTimer);
 
     /*
      * Footer.
@@ -817,7 +889,7 @@ void DrawPanelBodyForTeamReady(Handle hPanel, int iClient)
 
         for (int iPlayer = 0; iPlayer < iTotalPlayers[iTeam]; iPlayer ++)
         {
-            GetClientNameFixed(iPlayers[iTeam][iPlayer], szPlayerName, sizeof(szPlayerName), 18);
+            GetClientNameFixed(iPlayers[iTeam][iPlayer], szPlayerName, sizeof(szPlayerName), MAXSIZE_SHORT_NAME);
 
             DrawPanelFormatText(hPanel, "%T", "PANEL_BLOCK_ITEM", iClient,
                 IsClientWantUnpause(iPlayers[iTeam][iPlayer]) ? szPanelMarkReady : szPanelMarkUnready,
@@ -929,7 +1001,7 @@ int GetRandomClient()
 {
     for (int iClient = 1; iClient <= MaxClients; iClient++)
     {
-        if (!IsClientInGame(iClient) || IsFakeClient(iClient) || !IsValidTeam(GetClientTeam(iClient))) {
+        if (!IsClientInGame(iClient) || IsFakeClient(iClient)) {
             continue;
         }
 
@@ -1037,7 +1109,7 @@ bool IsValidTeam(int iTeam) {
  * @return              True if client is in ghost state, false otherwise.
  */
 bool IsClientGhost(int iClient) {
-	return view_as<bool>(GetEntProp(iClient, Prop_Send, "m_isGhost"));
+    return view_as<bool>(GetEntProp(iClient, Prop_Send, "m_isGhost"));
 }
 
 /**
@@ -1046,5 +1118,15 @@ bool IsClientGhost(int iClient) {
  * @return                  Returns true if is second round, otherwise false.
  */
 bool InSecondHalfOfRound() {
-	return view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
+    return view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 }
+
+// L 10/01/2026 - 21:00:57: [optional/pause_rework.smx] [Event_PlayerTeam] >_ 9(variety): 0 -> 1
+// L 10/01/2026 - 21:01:38: [optional/pause_rework.smx] [Event_PlayerTeam] >_ 11(saimon): 3 -> 1
+// L 10/01/2026 - 21:01:38: [optional/pause_rework.smx] [Spectate_Cmd] >_ 11
+// L 10/01/2026 - 21:01:41: [optional/pause_rework.smx] [SecureSpec] >_ 11
+// L 10/01/2026 - 21:01:46: [optional/pause_rework.smx] [Event_PlayerTeam] >_ 11(saimon): 1 -> 3
+// L 10/01/2026 - 21:01:46: [optional/pause_rework.smx] [Spectate_Cmd] >_ 11
+// L 10/01/2026 - 21:01:46: [optional/pause_rework.smx] [Event_PlayerTeam] >_ 11(saimon): 3 -> 1
+// L 10/01/2026 - 21:01:49: [optional/pause_rework.smx] [SecureSpec] >_ 11
+// L 10/01/2026 - 21:02:42: [optional/pause_rework.smx] [Event_PlayerTeam] >_ 1(Epileptick1d): 2 -> 0

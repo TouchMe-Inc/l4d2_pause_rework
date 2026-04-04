@@ -94,8 +94,8 @@ int g_iMaxAttempts = 0;
 
 int g_iCountdownTimer = 0;
 
-float g_fClientCommandSpamCooldown[MAXPLAYERS + 1];
-int g_iClientCommandSpamAttempts[MAXPLAYERS + 1];
+float g_fClientCommandSpamCooldown[MAXPLAYERS + 1] = {0.0, ...};
+int g_iClientCommandSpamAttempts[MAXPLAYERS + 1] = {0, ...};
 
 bool g_bClientWantUnpause[MAXPLAYERS + 1];
 
@@ -344,8 +344,14 @@ void OnMaxAttemptsBeforeIncementChanged(ConVar convar, const char[] oldValue, co
     g_iMaxAttempts = GetConVarInt(convar);
 }
 
-public OnMapStart() {
+public OnMapStart()
+{
     g_iTeamLimit[0] = g_iTeamLimit[1] = 0;
+
+    for (int iClient = 1; iClient <= MaxClients; iClient ++)
+    {
+        g_fClientCommandSpamCooldown[iClient] = 0.0;
+    }
 }
 
 public Action Cmd_Pause(int iClient, int args)

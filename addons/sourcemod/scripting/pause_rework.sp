@@ -86,6 +86,8 @@ Handle
     g_hPanelFooter = null
 ;
 
+Handle SpecTimer[MAXPLAYERS + 1];
+
 int g_iPauseDelay = 0;
 int g_iPauseLimit = 0;
 float g_fSpamCooldownInitial = 0.0;
@@ -94,8 +96,8 @@ int g_iMaxAttempts = 0;
 
 int g_iCountdownTimer = 0;
 
-float g_fClientCommandSpamCooldown[MAXPLAYERS + 1];
-int g_iClientCommandSpamAttempts[MAXPLAYERS + 1];
+float g_fClientCommandSpamCooldown[MAXPLAYERS + 1] = {0.0, ...};
+int g_iClientCommandSpamAttempts[MAXPLAYERS + 1] = {0, ...};
 
 bool g_bClientWantUnpause[MAXPLAYERS + 1];
 
@@ -258,7 +260,6 @@ public void OnPluginStart()
     g_cvSpamCooldownIncrement = CreateConVar("sm_pause_spam_cd_inc", "1.0", "Cooldown increment time in seconds", _, true,  0.0);
     g_cvMaxAttemptsBeforeIncrement = CreateConVar("sm_pause_spam_attempts_before_inc", "2", "Maximum number of attempts before increasing cooldown", _, true, 10.0);
 
-
     /*
      * Register ConVar change callbacks.
      */
@@ -281,6 +282,8 @@ public void OnPluginStart()
     g_fSpamCooldownIncrement = GetConVarFloat(g_cvSpamCooldownIncrement);
     g_iMaxAttempts = GetConVarInt(g_cvMaxAttemptsBeforeIncrement);
 
+    HookEvent("player_team", Event_PlayerTeam, EventHookMode_Post);
+
     /*
      * Player Commands.
      */
@@ -289,6 +292,11 @@ public void OnPluginStart()
     RegConsoleCmd("sm_r", Cmd_Ready);
     RegConsoleCmd("sm_unready", Cmd_Unready);
     RegConsoleCmd("sm_nr", Cmd_Unready);
+
+    // TEMP FIX
+    RegConsoleCmd("sm_spectate", Spectate_Cmd, "Moves you to the spectator team");
+    RegConsoleCmd("sm_spec", Spectate_Cmd, "Moves you to the spectator team");
+    RegConsoleCmd("sm_s", Spectate_Cmd, "Moves you to the spectator team");
 
     AddCommandListener(Vote_Callback, "Vote"); // Hook vote <KEY_F1> or <KEY_F2>.
     AddCommandListener(ConCmd_Pause, "pause");
@@ -344,8 +352,35 @@ void OnMaxAttemptsBeforeIncementChanged(ConVar convar, const char[] oldValue, co
     g_iMaxAttempts = GetConVarInt(convar);
 }
 
-public OnMapStart() {
+/**
+ *
+ */
+void Event_PlayerTeam(Event event, const char[] szName, bool bDontBroadcast)
+{
+    if (IsPauseState(PauseState_None)) {
+        return;
+    }
+
+    int iClient = GetClientOfUserId(GetEventInt(event, "userid"));
+
+    if (!iClient || IsFakeClient(iClient)) {
+        return;
+    }
+
+    int iOldTeam = GetEventInt(event, "oldteam");
+    int iTeam = GetEventInt(event, "team");
+
+    LogError(">_ %N: %d -> %d", iClient, iOldTeam, iTeam);
+}
+
+public OnMapStart()
+{
     g_iTeamLimit[0] = g_iTeamLimit[1] = 0;
+
+    for (int iClient = 1; iClient <= MaxClients; iClient ++)
+    {
+        g_fClientCommandSpamCooldown[iClient] = 0.0;
+    }
 }
 
 public Action Cmd_Pause(int iClient, int args)
@@ -358,7 +393,7 @@ public Action Cmd_Pause(int iClient, int args)
         return Plugin_Continue;
     }
 
-    if (!iClient || !IsClientInGame(iClient)) {
+    if (!iClient || !IsClientInGame(iClient) || SpecTimer[iClient] != null) {
         return Plugin_Continue;
     }
 
@@ -459,7 +494,7 @@ Action Cmd_Ready(int iClient, int iArgs)
         return Plugin_Continue;
     }
 
-    if (!iClient || !IsClientInGame(iClient)) {
+    if (!iClient || !IsClientInGame(iClient) || SpecTimer[iClient] != null) {
         return Plugin_Continue;
     }
 
@@ -542,7 +577,7 @@ Action Cmd_Unready(int iClient, int iArgs)
         return Plugin_Continue;
     }
 
-    if (!iClient || !IsClientInGame(iClient)) {
+    if (!iClient || !IsClientInGame(iClient) || SpecTimer[iClient] != null) {
         return Plugin_Continue;
     }
 
@@ -597,6 +632,24 @@ Action Cmd_Unready(int iClient, int iArgs)
     }
 
     return Plugin_Handled;
+}
+
+Action Spectate_Cmd(int client, int args)
+{
+    if (SpecTimer[client] != null)
+    {
+        delete SpecTimer[client];
+    }
+	
+    SpecTimer[client] = CreateTimer(3.0, SecureSpec, client);
+
+    return Plugin_Handled;
+}
+
+Action SecureSpec(Handle timer, any client)
+{
+    SpecTimer[client] = null;
+    return Plugin_Stop;
 }
 
 /**
